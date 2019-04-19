@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Mueller unredacter</title>
+  <script src="https://cdn.jsdelivr.net/npm/mobile-detect@1.4.3/mobile-detect.min.js"></script>
+  <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js" type="text/javascript"></script>
+
+  <style>
+    #container {
+      width: 40em;
+      max-width: 100%;
+      margin: auto;
+    }
+
+    img {
+      width: 100%;
+    }
+
+    #text {
+      font-family: serif;
+      font-size: 1.5em;
+      padding: 0.5em;
+    }
+
+    #status {
+      color: red;
+      font-family: sans-serif;
+      font-size: 2em;
+    }
+
+    #input {
+      /* white-space: pre; */
+    }
+
+    [contenteditable]:focus {
+      outline: 0px solid transparent;
+    }
+
+    #generated {
+      color: white;
+      background: black;
+    }
+
+    #buttons {
+      display: none;
+      font-size: 3em;
+    }
+
+    a>img {
+      width: 3em;
+    }
+
+    input {
+      filter: grayscale(100%);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="container">
+    <img src="header.jpg" />
+    <div id="status"></div>
+    <div>QAnon setting:
+      <input type="radio" name="temperature" value="0.3"> low
+      <input type="radio" name="temperature" value="0.5" checked> medium
+      <input type="radio" name="temperature" value="0.9"> high
+      <input type="radio" name="temperature" value="-1.0"> godspeed
+    </div>
+    <div id="text"><span id="input" contenteditable="true"></span> <span id="generated"></span></div>
+    <div id="buttons"><a href="#" id="more"><img src="more.jpg" alt="more"></a> <a href="#" id="reload"><img
+          src="reload.jpg" alt="reload"></a></div>
+  </div>
+  <script>
+    const minCharacters = 50;
+    const maxCharacters = 250;
+    const rnn = new ml5.charRNN('./models/mueller');
+
+    let prevInput = '';
+    let curOutput = '';
+    let baseOutput = '';
+
+    window.addEventListener('load', () => {
+      const os = new MobileDetect(window.navigator.userAgent).os();
+      if (os == 'iOS' || os == 'Android') {
+        const statusElt = document.querySelector('#status');
+        statusElt.innerText = "Sorry! ml5.js text generation <a href='https://github.com/ml5js/ml5-library/issues/299'>isn't working on mobile</a> right now!";
+      }
+
+      const inputElt = document.querySelector('#input');
+      const generatedElt = document.querySelector('#generated');
+      const buttonsElt = document.querySelector('#buttons');
+
+      const quotes = [
+        "Trump Jr. immediately responded that \"if it's what you say I love",
+        "\"I hope you can see your way clear to letting this go, to",
+        "Manafort lied to the Office and the grand jury concerning",
+        "The President slumped back in his chair and said, \"Oh my God.",
+      ];
+      inputElt.innerText = quotes[Math.floor(Math.random() * quotes.length)]
+
+      function getTemperature() {
+        return parseFloat(document.querySelector('input[name="temperature"]:checked').value);
+      }
+
+      let needToReload = false;
+
+      async function reload() {
+        const curInput = inputElt.innerText.trim();
+        prevInput = curInput;
+        baseOutput = '';
+        curOutput = '';
+        generatedElt.innerHTML = '';
+        rnn.reset();
+        await rnn.feed(curInput + ' ');
+        needToReload = false;
+        running = true;
+      }
+
+      let running = true;
+      async function loop() {
+        if (rnn.ready) {
+          const curInput = inputElt.innerText.trim();
+          if (needToReload || prevInput != curInput) {
+            await reload();
+          }
+          if (running) {
+            let temperature = getTemperature();
+            const godspeed = temperature == -1.0;
+            if (godspeed) {
+              // for godspeed, alternate between two temperatures
+              const allOutput = baseOutput + curOutput;
+              temperature = (Math.floor(allOutput.length / 12) % 2) == 0 ? 0.5 : 2.0;
+            }
+            try {
+              const out = await rnn.predict(temperature);
+              buttonsElt.style.display = 'none';
+              if (out.sample) {
+                curOutput += out.sample;
+                generatedElt.innerHTML = baseOutput + curOutput;
+                await rnn.feed(out.sample);
+                if ((out.sample != '.' || godspeed || curOutput.length < minCharacters) &&
+                  curOutput.length < maxCharacters) {
+                } else {
+                  baseOutput += curOutput;
+                  curOutput = '';
+                  buttonsElt.style.display = 'inline';
+                  running = false;
+                }
+              } else {
+                // sometimes returns undefined
+                console.error('sample error');
+                reload();
+                buttonsElt.style.display = 'inline';
+              }
+            } catch (err) {
+              // sometimes fails to predict
+              console.error('predict error')
+              running = false;
+              buttonsElt.style.display = 'inline';
+            }
+          }
+        }
+        requestAnimationFrame(loop);
+      }
+      requestAnimationFrame(loop);
+
+      document.querySelector('#more').onclick = () => running = true;
+      document.querySelector('#reload').onclick = reload;
+    });
+  </script>
+</body>
+
+</html>
